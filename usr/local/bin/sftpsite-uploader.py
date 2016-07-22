@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-  detron-uploader daemon: starts thread triggered by rabbitMQ
+  sftpsite-uploader daemon: starts thread triggered by rabbitMQ
 """
 import os
 import logging
@@ -15,7 +15,7 @@ def callback(ch, method, properties, body):
     """ start sftp thread and ack rabbitMQ message """
     platform_rsync_pid, platform, dir_now_format, up_file = body.split(',')
     try:
-        sftp_thread = Thread(target=detron_thread, args=(
+        sftp_thread = Thread(target=sftpsite_thread, args=(
             platform_rsync_pid, platform, dir_now_format, up_file))
         sftp_thread.start()
     except Exception, e:
@@ -28,8 +28,8 @@ def callback(ch, method, properties, body):
     ch.basic_ack(delivery_tag=method.delivery_tag)
 
 
-def detron_thread(platform_rsync_pid, platform, dir_now_format, up_file):
-    """ upload file to detron """
+def sftpsite_thread(platform_rsync_pid, platform, dir_now_format, up_file):
+    """ upload file to sftpsite """
     logging.info(
         ("[{0}] SFTP: Started new upload thread for platform {1} and file {2}".format(
             platform_rsync_pid, platform, up_file)))
@@ -43,7 +43,7 @@ def detron_thread(platform_rsync_pid, platform, dir_now_format, up_file):
     sftp_username = config.get(platform, 'sftp_username')
     platform_ssh_key = "/home/encryptonator/.ssh/{}".format(platform)
 
-    # use the proxy server to connect to the detron sftp server
+    # use the proxy server to connect to the sftpsite sftp server
     proxy_command = '/usr/bin/connect -H {0}:{1} {2} {3}'.format(
         proxy_host, proxy_port, host, port)
 
@@ -63,7 +63,7 @@ def detron_thread(platform_rsync_pid, platform, dir_now_format, up_file):
             )
         sftp = client.open_sftp()
     except Exception, e:
-        logging.info("[{0}] SFTP: Could not connect {1} to Detron: {2}".format(
+        logging.info("[{0}] SFTP: Could not connect {1} to Sftp Site: {2}".format(
             platform_rsync_pid, platform, e))
         connected = False
         sftp.close()
@@ -126,19 +126,19 @@ if __name__ == "__main__":
     pika_logger = logging.getLogger('pika')
     pika_logger.setLevel(logging.CRITICAL)
 
-    # encryptonator posts messages on the 'detron' queue for each sftp transfer
+    # encryptonator posts messages on the 'sftpsite' queue for each sftp transfer
     try:
         connection = pika.BlockingConnection(
             pika.ConnectionParameters(host='localhost'))
         channel = connection.channel()
-        channel.queue_declare(queue='detron', durable=True)
+        channel.queue_declare(queue='sftpsite', durable=True)
         channel.basic_qos(prefetch_count=1)
-        channel.basic_consume(callback, queue='detron')
+        channel.basic_consume(callback, queue='sftpsite')
     except Exception, e:
         msg = "SFTP: Failed to create queue: {0}".format(e)
         logging.error(msg)
         notify_nagios(msg)
         os.sys.exit(1)
 
-    logging.info("SFTP: Starting consuming from the detron queue.")
+    logging.info("SFTP: Starting consuming from the sftpsite queue.")
     channel.start_consuming()

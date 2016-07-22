@@ -25,7 +25,7 @@ def encrypt(platform, platform_rsync_pid, platform_path, in_filename):
     """ encrypt file """
     logging.info('[{0}] ENC: Encrypting {1}'.format(
         platform_rsync_pid, os.path.basename(in_filename)))
-    # upload a file to detron
+    # upload a file to sftpsite
     # the file name is prepended byt the date and time (hour and minute)
     now = datetime.now()
     now_format = now.strftime("%Y%m%d%H%M%S")
@@ -34,11 +34,11 @@ def encrypt(platform, platform_rsync_pid, platform_path, in_filename):
                                             os.path.basename(in_filename))
     out_filename = filename.replace(platform_rsync_pid, 'enc')
 
-    # check if we have enough space on detron for this file
+    # check if we have enough space on sftpsite for this file
     filesize = os.path.getsize(in_filename)
-    check_detron = check_size(filesize, in_filename, platform)
+    check_sftpsite = check_size(filesize, in_filename, platform)
 
-    if check_detron:
+    if check_sftpsite:
         os.remove(in_filename)
     else:
         # create random aes key, encrypt it using gpg with a platform
@@ -69,10 +69,10 @@ def encrypt(platform, platform_rsync_pid, platform_path, in_filename):
         # create the md5sum of the enrypted aes key and store it
         gpg_aes_key_file_md5 = get_md5sum(gpg_aes_key_file_name)
         gpg_aes_file_md5 = '{}.md5'.format(gpg_aes_key_file_name)
-        detron_md5_file_format = '{0}  {1}'.format(
+        sftpsite_md5_file_format = '{0}  {1}'.format(
             gpg_aes_key_file_md5, os.path.basename(gpg_aes_key_file_name))
         with open(gpg_aes_file_md5, 'wb') as md5_out:
-            md5_out.write(detron_md5_file_format)
+            md5_out.write(sftpsite_md5_file_format)
         logging.info("[{0}] ENC: Stored AES key in {1}".format(
             platform_rsync_pid, os.path.basename(gpg_aes_key_file_name)))
 
@@ -98,14 +98,14 @@ def encrypt(platform, platform_rsync_pid, platform_path, in_filename):
         # create the md5sum of the encrypted file and store it
         out_filename_md5 = get_md5sum(out_filename)
         out_file_md5 = '{}.md5'.format(out_filename)
-        detron_md5_file_format = '{0}  {1}'.format(
+        sftpsite_md5_file_format = '{0}  {1}'.format(
             out_filename_md5, os.path.basename(out_filename))
         with open(out_file_md5, 'wb') as md5_out:
-            md5_out.write(detron_md5_file_format)
+            md5_out.write(sftpsite_md5_file_format)
         logging.info("[{0}] ENC: Finished encrypting {1}".format(
             platform_rsync_pid, os.path.basename(in_filename)))
 
-        # we first upload the md5sum (as requeste by detron)
+        # we first upload the md5sum (as requeste by sftpsite)
         # then we upload the gpg key and then we send the real file to MQ
         for item_file in gpg_aes_file_md5, out_file_md5, gpg_aes_key_file_name:
             upload_file(platform_rsync_pid, platform, item_file)
@@ -113,7 +113,7 @@ def encrypt(platform, platform_rsync_pid, platform_path, in_filename):
 
 
 def upload_file(platform_rsync_pid, platform, up_file, mq=None):
-    """ upload file to detron """
+    """ upload file to sftpsite """
     remote_file = os.path.basename(up_file)
     now = datetime.now()
     dir_now_format = now.strftime("%Y%m%d")
@@ -128,7 +128,7 @@ def upload_file(platform_rsync_pid, platform, up_file, mq=None):
     sftp_username = config.get(platform, 'sftp_username')
     platform_ssh_key = "/home/encryptonator/.ssh/{}".format(platform)
 
-    # use the proxy server to connect to the detron sftp server
+    # use the proxy server to connect to the sftpsite sftp server
     proxy_command = '/usr/bin/connect -H {0}:{1} {2} {3}'.format(
         proxy_host, proxy_port, host, port)
 
@@ -148,7 +148,7 @@ def upload_file(platform_rsync_pid, platform, up_file, mq=None):
             )
         sftp = client.open_sftp()
     except Exception, e:
-        logging.info("[{0}] ENC: Could not connect {1} to Detron: {2}".format(
+        logging.info("[{0}] ENC: Could not connect {1} to Sftp Site: {2}".format(
             platform_rsync_pid, platform, e))
         sftp.close()
         client.close()
@@ -168,7 +168,7 @@ def upload_file(platform_rsync_pid, platform, up_file, mq=None):
         if absent:
             try:
                 sftp.mkdir(dir_now_path, mode=0700)
-                # we agreed with Detron to let incron assign permissions 700
+                # we agreed with Sftp Site to let incron assign permissions 700
                 sftp.chmod(dir_now_path, 0700)
                 sleep(3)
             except Exception, e:
@@ -187,24 +187,24 @@ def upload_file(platform_rsync_pid, platform, up_file, mq=None):
             message = '{0},{1},{2},{3}'.format(
                 platform_rsync_pid, platform, dir_now_format, up_file)
             logging.info(
-                '[{0}] ENC: Publishing message for platform {1} to upload to Detron {0}'.format(
+                '[{0}] ENC: Publishing message for platform {1} to upload to Sftp Site {0}'.format(
                     platform_rsync_pid, platform))
             try:
                 connection_det = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
                 channel_det = connection_det.channel()
-                channel_det.queue_declare(queue='detron', durable=True)
+                channel_det.queue_declare(queue='sftpsite', durable=True)
             except Exception, e:
                 msg = '[rsync]: ERROR: Failed to create queue: {0}'.format(e)
                 logging.error(msg)
             try:
                 channel_det.basic_publish(exchange='',
-                                          routing_key='detron',
+                                          routing_key='sftpsite',
                                           body=message,
                                           properties=pika.BasicProperties(
                                               delivery_mode=2,))
                 connection_det.close()
             except Exception, e:
-                msg_det = '[{0}] ENC: Failed to publish message for platform {1} to upload to Detron {0}: {2} '.format(platform_rsync_pid, platform, e)
+                msg_det = '[{0}] ENC: Failed to publish message for platform {1} to upload to Sftp Site {0}: {2} '.format(platform_rsync_pid, platform, e)
                 logging.error(msg_det)
         else:
             try:
@@ -293,7 +293,7 @@ def callback(ch, method, properties, body):
 
 
 def check_size(file_size, file_name, platform):
-    """ compare file size with available size on detron """
+    """ compare file size with available size on sftpsite """
     ssh_key = '/home/encryptonator/.ssh/{}'.format(platform)
     df_batch = '/home/encryptonator/df'
     if 'ix5' in socket.getfqdn():
@@ -308,7 +308,7 @@ def check_size(file_size, file_name, platform):
     proc_out = proc_sftp.communicate()[0]
     retcode = proc_sftp.returncode
     if retcode is not 0:
-        notify_nagios('Team {} cannot connect to Detron'.format(platform))
+        notify_nagios('Team {} cannot connect to Sftp Site'.format(platform))
         return 'noconnection'
     else:
         proc_out = proc_out.split('\n')[-2]  # take last but one row
@@ -317,7 +317,7 @@ def check_size(file_size, file_name, platform):
         if file_size >= disk_avail:
             mb_file_size = file_size / 1024
             mb_disk_avail = disk_avail / 1024
-            notify_nagios('The file size to backup ({0} MB) exceeds the space available ({1} MB) on Detron'.format(mb_file_size, mb_disk_avail))
+            notify_nagios('The file size to backup ({0} MB) exceeds the space available ({1} MB) on Sftp Site'.format(mb_file_size, mb_disk_avail))
             notify_nagios('The file {} will be removed'.format(file_name))
             return 'nospace'
 

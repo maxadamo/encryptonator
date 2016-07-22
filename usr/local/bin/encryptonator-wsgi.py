@@ -2,9 +2,9 @@
 """ starts CherryPy web server
       features:
         - span groups on ldap and grant access to specific platform
-        - list files on Detron for the chosen platform
-        - browse remote directories on Detron
-        - download a specific file from Detron
+        - list files on Sftp Site for the chosen platform
+        - browse remote directories on Sftp Site
+        - download a specific file from Sftp Site
         - decrypt the file
         - send job notification thru email
         - serve the file over http
@@ -141,7 +141,7 @@ class App(object):
                 if not all_groups:
                     return ops_page
 
-        return get_detron_dirlist(self.platform, self.directory_level)
+        return get_sftpsite_dirlist(self.platform, self.directory_level)
 
     @cherrypy.expose
     def get_and_decrypt(self, myfile='filename', sftp_path=None):
@@ -160,7 +160,7 @@ class App(object):
                 my_dir = os.path.join('/home', self.platform)
             else:
                 my_dir = os.path.join(sftp_path, name_of_file)
-            return get_detron_dirlist(self.platform, my_dir)
+            return get_sftpsite_dirlist(self.platform, my_dir)
         else:
             full_name = os.path.join(sftp_path, name_of_file)
             stripped_name = '/'.join(full_name.split('/')[-2:])
@@ -215,7 +215,7 @@ class App(object):
 
     @cherrypy.expose
     def start_processing(self, platform, name_of_file, mymail, mypass):
-        """ get file list from detron """
+        """ get file list from sftpsite """
         devnull = open(os.devnull, 'w')
         decrypt_cmd = 'export PASSPHRASE={0}; /usr/local/bin/decryptonator-wsgi.py -f {1} -p {2} -e {3} &'.format(mypass, name_of_file, self.platform, mymail)
         sp.Popen(decrypt_cmd, shell=True, stdout=devnull, stderr=sp.STDOUT)
@@ -443,8 +443,8 @@ def finalize_gpg(file1, file2, script1='/home/encryptonator/bin/gpg_sync.sh'):
     log_file.close()
 
 
-def get_detron_dirlist(platform, detron_dir=None):
-    """ get a list of files and directories from detron """
+def get_sftpsite_dirlist(platform, sftpsite_dir=None):
+    """ get a list of files and directories from sftpsite """
     # get configuration from encryptonator config file
     config = ConfigParser.RawConfigParser()
     config.readfp(open('/etc/encryptonator/encryptonator.conf'))
@@ -455,7 +455,7 @@ def get_detron_dirlist(platform, detron_dir=None):
     sftp_username = config.get(platform, 'sftp_username')
     platform_ssh_key = os.path.join('/home/encryptonator/.ssh', platform)
 
-    # use the proxy server to connect to the detron sftp server
+    # use the proxy server to connect to the sftpsite sftp server
     proxy_command = '/usr/bin/connect -H {0}:{1} {2} {3}'.format(
         proxy_host,
         proxy_port,
@@ -475,12 +475,12 @@ def get_detron_dirlist(platform, detron_dir=None):
             sock=sock)
         sftp = client.open_sftp()
     except Exception, e:
-        return "Failed to connect to detron: {0}".format(e)
+        return "Failed to connect to sftpsite: {0}".format(e)
 
-    if not detron_dir:
-        detron_dir = os.path.join('/home', platform)
+    if not sftpsite_dir:
+        sftpsite_dir = os.path.join('/home', platform)
 
-    sftp.chdir(detron_dir)
+    sftp.chdir(sftpsite_dir)
     sftp_cwd = sftp.getcwd()
     dir_list = sftp.listdir('.')
 

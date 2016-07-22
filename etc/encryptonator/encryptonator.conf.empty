@@ -1,6 +1,6 @@
 [sftp]
-host = detron_sftp_host
-port = detron_sftp_port
+host = sftpsite_sftp_host
+port = sftpsite_sftp_port
 proxy_host = proxy_host
 proxy_port = proxy_port
 

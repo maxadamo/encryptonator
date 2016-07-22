@@ -1,6 +1,6 @@
 #!/usr/bin/python
 """ Spans all users, based on the private key stored inside
-    /home/encryptonator/.ssh/ and run df onto Detron server
+    /home/encryptonator/.ssh/ and run df onto Sftp Site server
 """
 from glob import glob
 import subprocess as sp
@@ -11,7 +11,7 @@ import os
 
 def parse():
     """ pass arguments to the script """
-    parser = argparse.ArgumentParser(description="check Detron disk usage")
+    parser = argparse.ArgumentParser(description="check Sftp Site disk usage")
     parser.add_argument('-w', '--warn', help='Warning limit', default=80, type=int)
     parser.add_argument('-c', '--crit', help='Critical limit', default=95, type=int)
     return parser.parse_args()
@@ -25,13 +25,13 @@ def nagios_exit(state, msg):
     # print '{0}: {1}'.format(state, msg)
     # os.sys.exit(states[state])
     msg_content = '{0}: {1}'.format(state, msg)
-    with open('/home/encryptonator/detron_space.log', 'w') as detron_log:
-        detron_log.write(msg_content)
+    with open('/home/encryptonator/sftpsite_space.log', 'w') as sftpsite_log:
+        sftpsite_log.write(msg_content)
     os.sys.exit(0)
 
 
 def loop_users(proxy, warn=80, crit=90, err_msg=''):
-    """ spans all user and run df on detron """
+    """ spans all user and run df on sftpsite """
     home_dir = '/home/encryptonator'
     os.chdir('/home/encryptonator/.ssh')
     pubkeys = glob('*.pub')
@@ -51,7 +51,7 @@ def loop_users(proxy, warn=80, crit=90, err_msg=''):
         retcode = proc_sftp.returncode
         if retcode is not 0:
             disk_usage = -1
-            err_msg += 'CRITICAL: Team {} cannot connect to Detron, '.format(team_name)
+            err_msg += 'CRITICAL: Team {} cannot connect to Sftp Site, '.format(team_name)
         else:
             proc_out = proc_out.split('\n')[-2]  # take last but one row
             disk_usage = int(proc_out.split()[-1].replace('%', ''))

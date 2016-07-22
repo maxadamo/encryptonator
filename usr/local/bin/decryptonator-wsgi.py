@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-  decrypts and downloads a file from Detron
+  decrypts and downloads a file from Sftp Site
 """
 import os
 import re
@@ -22,7 +22,7 @@ from Crypto.Cipher import AES
 
 def parse():
     """ pass arguments to the script """
-    parser = argparse.ArgumentParser(description="retrieve and decrypt files from detron")
+    parser = argparse.ArgumentParser(description="retrieve and decrypt files from sftpsite")
     parser.add_argument('-p', '--platform', help='Platform name', required=True)
     parser.add_argument('-f', '--file', help='File name to restore', required=True)
     parser.add_argument('-e', '--email', help='E-mail to send a job notification', required=True)
@@ -30,8 +30,8 @@ def parse():
     return parser.parse_args()
 
 
-def get_detron_file(sftp_file, local_file, recipient, subject, platform):
-    """ Get file from detron """
+def get_sftpsite_file(sftp_file, local_file, recipient, subject, platform):
+    """ Get file from sftpsite """
     config_ssh = ConfigParser.RawConfigParser()
     config_ssh.readfp(open('/etc/encryptonator/encryptonator.conf'))
     host = config_ssh.get('sftp', 'host')
@@ -194,7 +194,7 @@ if __name__ == "__main__":
     restore_file = os.path.join(restore_path, os.path.basename(ARGS.file))
 
     for download_file in restore_file, gpg_file:
-        get_detron_file(
+        get_sftpsite_file(
             os.path.join(remote_path, os.path.basename(download_file)),
             os.path.join(restore_path, os.path.basename(download_file)),
             ARGS.email, SUBJ, ARGS.platform)

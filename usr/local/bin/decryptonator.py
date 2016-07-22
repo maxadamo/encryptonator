@@ -1,6 +1,6 @@
 #!/usr/bin/python
 """
-  decrypts and downloads a file from Detron
+  decrypts and downloads a file from Sftp Site
 """
 from optparse import OptionParser
 import ConfigParser
@@ -15,8 +15,8 @@ import gnupg
 import paramiko
 
 
-def get_detron_dirlist(platform):
-    """ get file list from detron """
+def get_sftpsite_dirlist(platform):
+    """ get file list from sftpsite """
     config = ConfigParser.RawConfigParser()
     config.readfp(open('/etc/encryptonator/encryptonator.conf'))
     host = config.get('sftp', 'host')
@@ -44,12 +44,12 @@ def get_detron_dirlist(platform):
         dirlist = sftp.listdir('.')
         return dirlist
     except Exception, e:
-        print "Failed to get listing from detron: {0}".format(e)
+        print "Failed to get listing from sftpsite: {0}".format(e)
         quit(1)
 
 
-def get_detron_file(sftp_file):
-    """ Get file from detron """
+def get_sftpsite_file(sftp_file):
+    """ Get file from sftpsite """
     config = ConfigParser.RawConfigParser()
     config.readfp(open('/etc/encryptonator/encryptonator.conf'))
     host = config.get('sftp', 'host')
@@ -77,7 +77,7 @@ def get_detron_file(sftp_file):
         sftp = client.open_sftp()
         sftp.get(os.path.basename(sftp_file), sftp_file)
     except Exception, e:
-        print 'Failed to get file from detron: {0}'.format(e)
+        print 'Failed to get file from sftpsite: {0}'.format(e)
         quit(1)
 
 
@@ -139,10 +139,10 @@ if __name__ == "__main__":
         print "Unrecognized platform. Check /etc/encryptonator/encryptonator.conf for options."
         quit(1)
 
-    # get file listing from detron and exclude md5 and gpg files
+    # get file listing from sftpsite and exclude md5 and gpg files
     filelist = []
     remove_list = []
-    filelist = get_detron_dirlist(platform)
+    filelist = get_sftpsite_dirlist(platform)
     md5_regex = re.compile('^.*\.(md5|gpg)$')
     for file_item in filelist:
         if md5_regex.match(file_item):
@@ -164,7 +164,7 @@ if __name__ == "__main__":
     gpg_file = restore_file.replace('.enc', '.aes.gpg')
 
     for download_file in restore_file, gpg_file:
-        get_detron_file(download_file)
+        get_sftpsite_file(download_file)
 
     decrypt_file(restore_file, gpg_file)
 
