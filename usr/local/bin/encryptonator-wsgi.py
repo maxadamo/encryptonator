@@ -17,7 +17,6 @@ from stat import S_ISDIR
 import ConfigParser
 import subprocess as sp
 import argparse
-import socket
 import os
 import re
 import ldap
@@ -212,6 +211,21 @@ class App(object):
                 </html>""".format(html_head, name_of_file, self.platform,
                                   stripped_name, email_tip)
             return html_page
+
+    @cherrypy.expose
+    @cherrypy.tools.json_out()
+    def api(self, my_path='filename', my_team=None):
+        """ runs the specified command """
+        logged_user = cherrypy.request.headers.get("ldapuser")
+        email_tip = check_ldap_email(logged_user)
+        if not my_team:
+            err = ['ERROR: you need to supply a platform name']
+            return err
+        else:
+            home_path = os.path.join('/home', my_team)
+            my_dir = os.path.join(home_path, my_path)
+            return get_sftpsite_json(self.platform, my_dir)
+
 
     @cherrypy.expose
     def start_processing(self, platform, name_of_file, mymail, mypass):
@@ -535,6 +549,74 @@ def get_sftpsite_dirlist(platform, sftpsite_dir=None):
     return html_page
 
 
+def get_sftpsite_json(platform, sftpsite_dir=None, count=0):
+    """ get a list of files and directories from sftpsite """
+    # get configuration from encryptonator config file
+    config = ConfigParser.RawConfigParser()
+    config.readfp(open('/etc/encryptonator/encryptonator.conf'))
+    host = config.get('sftp', 'host')
+    port = config.get('sftp', 'port')
+    proxy_host = config.get('sftp', 'proxy_host')
+    proxy_port = config.get('sftp', 'proxy_port')
+    sftp_username = config.get(platform, 'sftp_username')
+    platform_ssh_key = os.path.join('/home/encryptonator/.ssh', platform)
+
+    # use the proxy server to connect to the sftpsite sftp server
+    proxy_command = '/usr/bin/connect -H {0}:{1} {2} {3}'.format(
+        proxy_host,
+        proxy_port,
+        host,
+        port)
+
+    try:
+        ssh_key = paramiko.RSAKey.from_private_key_file(platform_ssh_key)
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        sock = paramiko.ProxyCommand(proxy_command)
+        client.connect(
+            hostname=host,
+            port=int(port),
+            username=platform,
+            pkey=ssh_key,
+            sock=sock)
+        sftp = client.open_sftp()
+    except Exception, e:
+        return "Failed to connect to sftpsite: {0}".format(e)
+
+    if not sftpsite_dir:
+        sftpsite_dir = os.path.join('/home', platform)
+
+    try:
+        sftp.chdir(sftpsite_dir)
+    except Exception, err:
+        err_msg = 'ERROR: {0} not a directory or does not exist: {1}'.format(
+            sftpsite_dir, err)
+        return [err_msg]
+
+    sftp_cwd = sftp.getcwd()
+    dir_list = sftp.listdir('.')
+
+    # get rid of gpg, md5 files
+    md5_regex = re.compile('^.*\.(md5|gpg)$')
+    remove_list = []
+    for item in dir_list:
+        if md5_regex.match(item):
+            remove_list.append(item)
+    for remove_file in remove_list:
+        dir_list.remove(remove_file)
+
+    sorted_list = sorted([isdir_json(sftp, s) for s in dir_list])
+    sftp.close()
+    json_list = {}
+    for item in sorted_list:
+        json_list[count+1] = {
+            'type': sorted_list[count][0],
+            'size': sorted_list[count][1],
+            'name': sorted_list[count][2]}
+        count += 1
+    return json_list
+
+
 def check_gpg(platform):
     """ check the status of the GPG key """
     PLATFORM = platform.upper()
@@ -581,6 +663,16 @@ def isdir(sftp, path):
         else:
             path_size = '{0} B'.format(round(byte_syze, 2))
         isdir_string = '[file] {0} &#9; {1}'.format(path_size, path)
+    return isdir_string
+
+
+def isdir_json(sftp, path):
+    """ check wether is a dir or a file on an SFTP server """
+    if S_ISDIR(sftp.stat(path).st_mode):
+        isdir_string = ['directory', '0', path]
+    else:
+        byte_syze = sftp.stat(path).st_size
+        isdir_string = ['file', byte_syze, path]
     return isdir_string
 
 
