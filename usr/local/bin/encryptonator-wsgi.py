@@ -2,15 +2,14 @@
 """ starts CherryPy web server
       features:
         - span groups on ldap and grant access to specific platform
-        - list files on Sftp Site for the chosen platform
-        - browse remote directories on Sftp Site
-        - download a specific file from Sftp Site
+        - list files on the remote Sftp site for the chosen platform
+        - browse remote directories on the remote Sftp site
+        - download a specific file from the remote Sftp site
         - decrypt the file
         - send job notification thru email
         - serve the file over http
-      extras:
         - allows user to reset platform GPG passphrase
-    author: "Massimiliano Adamo<maxadamo@gmail.com>"
+    author: "Massimiliano Adamo<madamo@ebay.com>"
 """
 from __future__ import division
 from stat import S_ISDIR
@@ -145,7 +144,14 @@ class App(object):
     @cherrypy.expose
     def get_and_decrypt(self, myfile='filename', sftp_path=None):
         """ runs the specified command """
+        # the user must belong to one of the XX-encryptonator groups
+        # and its name should not end with -apiaccess
         logged_user = cherrypy.request.headers.get("ldapuser")
+        platform_group = check_ldap_group(logged_user)
+        all_groups = set([self.platform]) & set(platform_group)
+        if str.endswith(logged_user, '-apiaccess') or not all_groups:
+            return ops_page
+
         email_tip = check_ldap_email(logged_user)
         name_of_file = re.sub(r'^.*\t ', '', myfile)
         kind_of_file = re.sub(r'\].*', '', myfile).replace('[', '')
@@ -214,22 +220,15 @@ class App(object):
 
     @cherrypy.expose
     @cherrypy.tools.json_out()
-    def api(self, my_path='filename', my_team=None):
+    def api(self, my_path='filename'):
         """ runs the specified command """
-        logged_user = cherrypy.request.headers.get("ldapuser")
-        email_tip = check_ldap_email(logged_user)
-        if not my_team:
-            err = ['ERROR: you need to supply a platform name']
-            return err
-        else:
-            home_path = os.path.join('/home', my_team)
-            my_dir = os.path.join(home_path, my_path)
-            return get_sftpsite_json(self.platform, my_dir)
+        my_dir = os.path.join('/home', self.platform, my_path)
+        return get_sftpsite_json(self.platform, my_dir)
 
 
     @cherrypy.expose
     def start_processing(self, platform, name_of_file, mymail, mypass):
-        """ get file list from sftpsite """
+        """ get file list from the remote sftp site """
         devnull = open(os.devnull, 'w')
         decrypt_cmd = 'export PASSPHRASE={0}; /usr/local/bin/decryptonator-wsgi.py -f {1} -p {2} -e {3} &'.format(mypass, name_of_file, self.platform, mymail)
         sp.Popen(decrypt_cmd, shell=True, stdout=devnull, stderr=sp.STDOUT)
@@ -251,6 +250,14 @@ class App(object):
     @cherrypy.expose
     def reset_passphrase(self, platform):
         """ reset passphrase page """
+        # the user must belong to one of the XX-encryptonator groups
+        # and its name should not end with -apiaccess
+        logged_user = cherrypy.request.headers.get("ldapuser")
+        platform_group = check_ldap_group(logged_user)
+        all_groups = set([self.platform]) & set(platform_group)
+        if str.endswith(logged_user, '-apiaccess') or not all_groups:
+            return ops_page
+
         PLATFORM = platform.upper()
         years_set = \
             ['<option value="{0}">{0}</option>'.format(s) for s in range(1, 2)]
@@ -330,6 +337,9 @@ class App(object):
     @cherrypy.expose
     def change_pass(self, platform, oldsecret, newsecret, confirmsecret, years):
         """ run the code to change the passphrase """
+        config = ConfigParser.RawConfigParser()
+        config.readfp(open('/etc/encryptonator/encryptonator.conf'))
+        key_mail = config.get('main', 'distribution_list')
         PLATFORM = platform.upper()
         if newsecret != confirmsecret:
             err_msg = 'Passphrase and Passphrase verification did not match.'
@@ -360,7 +370,6 @@ class App(object):
         os.environ['HOME'] = '/home/encryptonator'
         passwd_file = os.path.join(os.environ['HOME'], 'passwd_file')
         expire_file = os.path.join(os.environ['HOME'], 'expire_file')
-        key_mail = 'email@domain.com'
         gpg = gnupg.GPG(gnupghome='/home/encryptonator/.gnupg')
         all_keys = gpg.list_keys()
         with open(passwd_file, 'w') as spool_file:
@@ -459,6 +468,14 @@ def finalize_gpg(file1, file2, script1='/home/encryptonator/bin/gpg_sync.sh'):
 
 def get_sftpsite_dirlist(platform, sftpsite_dir=None):
     """ get a list of files and directories from sftpsite """
+    # the user must belong to one of the XX-encryptonator groups
+    # and its name should not end with -apiaccess
+    logged_user = cherrypy.request.headers.get("ldapuser")
+    platform_group = check_ldap_group(logged_user)
+    all_groups = set([platform]) & set(platform_group)
+    if str.endswith(logged_user, '-apiaccess') or not all_groups:
+        return ops_page
+
     # get configuration from encryptonator config file
     config = ConfigParser.RawConfigParser()
     config.readfp(open('/etc/encryptonator/encryptonator.conf'))
@@ -580,8 +597,9 @@ def get_sftpsite_json(platform, sftpsite_dir=None, count=0):
             pkey=ssh_key,
             sock=sock)
         sftp = client.open_sftp()
-    except Exception, e:
-        return "Failed to connect to sftpsite: {0}".format(e)
+    except Exception, err:
+        err_msg = {'ERROR': 'Failed to connect to sftpsite: {0}'.format(e)}
+        return err_msg
 
     if not sftpsite_dir:
         sftpsite_dir = os.path.join('/home', platform)
@@ -589,9 +607,9 @@ def get_sftpsite_json(platform, sftpsite_dir=None, count=0):
     try:
         sftp.chdir(sftpsite_dir)
     except Exception, err:
-        err_msg = 'ERROR: {0} not a directory or does not exist: {1}'.format(
-            sftpsite_dir, err)
-        return [err_msg]
+        err_msg = {'ERROR': '{0} not a directory or does not exist: {1}'.format(
+            sftpsite_dir, err)}
+        return err_msg
 
     sftp_cwd = sftp.getcwd()
     dir_list = sftp.listdir('.')
@@ -612,17 +630,24 @@ def get_sftpsite_json(platform, sftpsite_dir=None, count=0):
         json_list[count+1] = {
             'type': sorted_list[count][0],
             'size': sorted_list[count][1],
-            'name': sorted_list[count][2]}
+            'name': sorted_list[count][2]
+            }
         count += 1
+    if not json_list:
+        json_list = {
+            'ERROR': '{} does not contain any file'.format(sftpsite_dir)}
+
     return json_list
 
 
 def check_gpg(platform):
     """ check the status of the GPG key """
+    config = ConfigParser.RawConfigParser()
+    config.readfp(open('/etc/encryptonator/encryptonator.conf'))
+    key_mail = config.get('main', 'distribution_list')
     PLATFORM = platform.upper()
     os.environ['USERNAME'] = 'encryptonator'
     os.environ['HOME'] = '/home/encryptonator'
-    key_mail = 'email@domain.com'
     gpg = gnupg.GPG(gnupghome='/home/encryptonator/.gnupg')
     all_keys = gpg.list_keys()
 
@@ -647,17 +672,19 @@ def check_gpg(platform):
 
 
 def isdir(sftp, path):
-    """ check wether is a dir or a file on an SFTP server """
+    """ check wether is a dir or a file on an SFTP server
+        and return type, size and name
+    """
     if S_ISDIR(sftp.stat(path).st_mode):
         isdir_string = '[directory]&#9;&#9; {0}'.format(path)
     else:
         byte_syze = sftp.stat(path).st_size
-        if byte_syze > 1024*1024*1024*1024:
-            path_size = '{0} T'.format(round(byte_syze/1024/1024/1024/1024, 2))
-        elif byte_syze > 1024*1024*1024:
-            path_size = '{0} G'.format(round(byte_syze/1024/1024/1024, 2))
-        elif byte_syze > 1024*1024:
-            path_size = '{0} M'.format(round(byte_syze/1024/1024, 2))
+        if byte_syze > 1024**4:
+            path_size = '{0} T'.format(round(byte_syze/(1024**4), 2))
+        elif byte_syze > 1024**3:
+            path_size = '{0} G'.format(round(byte_syze/(1024**3), 2))
+        elif byte_syze > 1024**2:
+            path_size = '{0} M'.format(round(byte_syze/(1024**2), 2))
         elif byte_syze > 1024:
             path_size = '{0} K'.format(round(byte_syze/1024, 2))
         else:
@@ -667,7 +694,9 @@ def isdir(sftp, path):
 
 
 def isdir_json(sftp, path):
-    """ check wether is a dir or a file on an SFTP server """
+    """ check wether is a dir or a file on an SFTP server
+        and return type, size and name
+    """
     if S_ISDIR(sftp.stat(path).st_mode):
         isdir_string = ['directory', '0', path]
     else:
@@ -680,16 +709,16 @@ def check_ldap_group(uid):
     """ Browse groups for the specified user """
     config = ConfigParser.RawConfigParser()
     config.readfp(open('/etc/encryptonator/encryptonator.conf'))
+    LDAP_BASE = config.get('ldap', 'ldap_base')
     LDAP_SERVER = config.get('ldap', 'ldap_server')
     GROUP_BASE = config.get('ldap', 'group_base')
     GROUP_SUFFIX = config.get('ldap', 'group_suffix')
     l = ldap.initialize(LDAP_SERVER)
-    search_filter = '(|(&(objectClass=*)(member=uid={0},ou=People,ou=company,o=com)))'.format(uid)
+    l_filter = '(|(&(objectClass=*)(member=uid={0},{1})))'.format(uid, LDAP_BASE)
 
     try:
-        results = l.search_s(GROUP_BASE, ldap.SCOPE_SUBTREE,
-                             search_filter, ['cn'])
-    except Exception, e:
+        results = l.search_s(GROUP_BASE, ldap.SCOPE_SUBTREE, l_filter, ['cn'])
+    except Exception:
         return None
 
     for ldapgroup in results:
@@ -709,19 +738,19 @@ def check_ldap_group(uid):
 
 
 def check_ldap_email(uid):
-    """ get the email for the spiecified user """
+    """ get the email for the specified user """
     config = ConfigParser.RawConfigParser()
     config.readfp(open('/etc/encryptonator/encryptonator.conf'))
     LDAP_SERVER = config.get('ldap', 'ldap_server')
     LDAP_BASE = config.get('ldap', 'ldap_base')
     l = ldap.initialize(LDAP_SERVER)
-    search_filter = '(|(&(objectClass=*)(uid={0})))'.format(uid)
+    l_filter = '(|(&(objectClass=*)(uid={0})))'.format(uid)
 
     try:
         result = l.search_s(LDAP_BASE, ldap.SCOPE_SUBTREE,
-                            search_filter, ['mail'])[0][1]['mail'][0]
-    except Exception, e:
-        return 'insert_your_user@domain.com'
+                            l_filter, ['mail'])[0][1]['mail'][0]
+    except Exception:
+        return 'insert_your_user@ebay.com'
 
     return result
 

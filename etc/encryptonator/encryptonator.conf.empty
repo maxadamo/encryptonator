@@ -1,6 +1,9 @@
+[main]
+distribution_list = 'email@domain.com'
+
 [sftp]
-host = sftpsite_sftp_host
-port = sftpsite_sftp_port
+host = sftpsite_host
+port = sftpsite_port
 proxy_host = proxy_host
 proxy_port = proxy_port
 
